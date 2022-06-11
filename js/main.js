@@ -39,7 +39,7 @@ function fetchData() {
     }
 }
 
-function updateDT(repo, default_branch, data) {
+function updateDT(data, default_branch) {
     // Remove any alerts, if any:
     if ($('.alert')) $('.alert').remove();
 
@@ -53,6 +53,11 @@ function updateDT(repo, default_branch, data) {
         }&s=48" width="24" height="24" class="mr-2 rounded-circle" />${
             fork.owner ? fork.owner.login : '<strike><em>Unknown</em></strike>'
         }`;
+        let compare = fetchFromApi(
+            `https://api.github.com/repos/${repo}/compare/${default_branch}...${fork.default_branch}`
+        );
+        fork.ahead_by = compare.ahead_by;
+        fork.behind_by = compare.behind_by;
         forks.push(fork);
     }
 
@@ -148,18 +153,10 @@ function fetchAndShow(repo) {
     );
 
     // fetch forks
-    let forks = fetchFromApi(
+    let data = fetchFromApi(
         `https://api.github.com/repos/${repo}/forks?sort=stargazers&direction=desc&per_page=100`
     );
-
-    for (let fork of forks) {
-        let compare = fetchFromApi(
-            `https://api.github.com/repos/${repo}/compare/${default_branch}...${fork.default_branch}`
-        );
-        fork.ahead_by = compare.ahead_by;
-        fork.behind_by = compare.behind_by;
-        updateDT(fork);
-    }
+    updateDT(data, default_branch);
 }
 
 function showMsg(msg, type) {
