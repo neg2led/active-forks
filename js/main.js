@@ -39,7 +39,7 @@ function fetchData() {
     }
 }
 
-function updateDT(data) {
+function updateDT(repo, default_branch, data) {
     // Remove any alerts, if any:
     if ($('.alert')) $('.alert').remove();
 
@@ -48,12 +48,14 @@ function updateDT(data) {
     for (let fork of data) {
         fork.repoLink = `<a href="https://github.com/${fork.full_name}">Link</a>`;
         fork.ownerName = `<img src="${
-      fork.owner.avatar_url || 'https://avatars.githubusercontent.com/u/0?v=4'
-    }&s=48" width="24" height="24" class="mr-2 rounded-circle" />${
-      fork.owner ? fork.owner.login : '<strike><em>Unknown</em></strike>'
-    }`;
+            fork.owner.avatar_url ||
+            'https://avatars.githubusercontent.com/u/0?v=4'
+        }&s=48" width="24" height="24" class="mr-2 rounded-circle" />${
+            fork.owner ? fork.owner.login : '<strike><em>Unknown</em></strike>'
+        }`;
         forks.push(fork);
     }
+
     const dataSet = forks.map((fork) =>
         window.columnNamesMap.map((colNM) => fork[colNM[1]])
     );
@@ -68,6 +70,8 @@ function initDT() {
         ['Owner', 'ownerName'], // custom key
         ['Name', 'name'],
         ['Branch', 'default_branch'],
+        ['Ahead', 'ahead_by'],
+        ['Behind', 'behind_by'],
         ['Stars', 'stargazers_count'],
         ['Forks', 'forks'],
         ['Open Issues', 'open_issues_count'],
@@ -87,19 +91,18 @@ function initDT() {
         columns: window.columnNamesMap.map((colNM) => {
             return {
                 title: colNM[0],
-                render: colNM[1] === 'pushed_at' ?
-                    (data, type, _row) => {
-                        if (type === 'display') {
-                            return moment(data).fromNow();
-                        }
-                        return data;
-                    } :
-                    null,
+                render:
+                    colNM[1] === 'pushed_at'
+                        ? (data, type, _row) => {
+                              if (type === 'display') {
+                                  return moment(data).fromNow();
+                              }
+                              return data;
+                          }
+                        : null,
             };
         }),
-        order: [
-            [sortColumnIdx, 'desc']
-        ],
+        order: [[sortColumnIdx, 'desc']],
         // paging: false,
         searchBuilder: {
             // all options at default
@@ -110,29 +113,53 @@ function initDT() {
     table.searchBuilder.container().prependTo(table.table().container());
 }
 
-function fetchAndShow(repo) {
-    repo = repo.replace('https://github.com/', '');
-    repo = repo.replace('http://github.com/', '');
-    repo = repo.replace(/\.git$/, '');
-
-    fetch(
-            `https://api.github.com/repos/${repo}/forks?sort=stargazers&per_page=100`
-        )
+function fetchFromApi(url, property) {
+    return fetch(url)
         .then((response) => {
             if (!response.ok) throw Error(response.statusText);
             return response.json();
         })
         .then((data) => {
-            updateDT(data);
+            if (property === undefined) {
+                return data;
+            } else {
+                return data[property];
+            }
         })
         .catch((error) => {
             const msg =
-                error.toString().indexOf('Forbidden') >= 0 ?
-                'Error: API Rate Limit Exceeded' :
-                error;
+                error.toString().indexOf('Forbidden') >= 0
+                    ? 'Error: API Rate Limit Exceeded'
+                    : error;
             showMsg(`${msg}. Additional info in console`, 'danger');
             console.error(error);
         });
+}
+
+function fetchAndShow(repo) {
+    repo = repo.replace('https://github.com/', '');
+    repo = repo.replace('http://github.com/', '');
+    repo = repo.replace(/\.git$/, '');
+
+    // fetch default branch
+    let default_branch = fetchFromApi(
+        `https://api.github.com/repos/${repo}`,
+        'default_branch'
+    );
+
+    // fetch forks
+    let forks = fetchFromApi(
+        `https://api.github.com/repos/${repo}/forks?sort=stargazers&direction=desc&per_page=100`
+    );
+
+    for (let fork of forks) {
+        let compare = fetchFromApi(
+            `https://api.github.com/repos/${repo}/compare/${default_branch}...${fork.default_branch}`
+        );
+        fork.ahead_by = compare.ahead_by;
+        fork.behind_by = compare.behind_by;
+        updateDT(fork);
+    }
 }
 
 function showMsg(msg, type) {
