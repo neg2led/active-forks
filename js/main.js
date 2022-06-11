@@ -157,7 +157,7 @@ function fetchAndShow(repo) {
     repo = repo.replace(/\.git$/, '');
     var default_branch;
 
-    var page_size = 50;
+    var page_size = 10;
 
     api_fetch(`https://api.github.com/repos/${repo}`)
         .then((response) => {
