@@ -1,3 +1,7 @@
+const github_token = '';
+
+var request_headers = new Headers({});
+
 window.addEventListener('load', () => {
     initDT(); // Initialize the DatatTable and window.columnNames variables
     addDarkmodeWidget();
@@ -6,7 +10,7 @@ window.addEventListener('load', () => {
 
     if (repo) {
         document.getElementById('q').value = repo;
-        fetchData();
+        // fetchData();
     }
 });
 
@@ -21,7 +25,12 @@ function addDarkmodeWidget() {
 
 function fetchData() {
     const repo = document.getElementById('q').value.replaceAll(' ', '');
+    const token = document.getElementById('token').value;
     const re = /[-_\w]+\/[-_.\w]+/;
+
+    if (token !== '') {
+        request_headers.set('Authorization', `token ${token}`);
+    }
 
     const urlRepo = getRepoFromUrl();
 
@@ -39,12 +48,13 @@ function fetchData() {
     }
 }
 
-function updateDT(data, default_branch) {
+async function updateDT(data, repo, default_branch) {
     // Remove any alerts, if any:
     if ($('.alert')) $('.alert').remove();
 
     // Format dataset and redraw DataTable. Use second index for key name
     const forks = [];
+    console.log(data);
     for (let fork of data) {
         fork.repoLink = `<a href="https://github.com/${fork.full_name}">Link</a>`;
         fork.ownerName = `<img src="${
@@ -53,11 +63,28 @@ function updateDT(data, default_branch) {
         }&s=48" width="24" height="24" class="mr-2 rounded-circle" />${
             fork.owner ? fork.owner.login : '<strike><em>Unknown</em></strike>'
         }`;
-        let compare = fetchFromApi(
-            `https://api.github.com/repos/${repo}/compare/${default_branch}...${fork.default_branch}`
-        );
-        fork.ahead_by = compare.ahead_by;
-        fork.behind_by = compare.behind_by;
+
+        let compare_uri = `https://api.github.com/repos/${repo}/compare/${default_branch}...${fork.owner.login}:${fork.default_branch}`;
+
+        const fetch_result = api_fetch(compare_uri)
+            .then((response) => {
+                if (!response.ok) throw Error(response.statusText);
+                return response.json();
+            })
+            .then((data) => {
+                fork.ahead_by = data.ahead_by;
+                fork.behind_by = data.behind_by;
+            })
+            .catch((error) => {
+                const msg =
+                    error.toString().indexOf('Forbidden') >= 0
+                        ? 'Error: API Rate Limit Exceeded'
+                        : error;
+                showMsg(`${msg}. Additional info in console`, 'danger');
+                console.error(error);
+            });
+
+        await fetch_result;
         forks.push(fork);
     }
 
@@ -74,14 +101,14 @@ function initDT() {
         ['Link', 'repoLink'], // custom key
         ['Owner', 'ownerName'], // custom key
         ['Name', 'name'],
-        ['Branch', 'default_branch'],
-        ['Ahead', 'ahead_by'],
-        ['Behind', 'behind_by'],
+        ['Default Branch', 'default_branch'],
+        ['Ahead', 'ahead_by'], // custom key
+        ['Behind', 'behind_by'], // custom key
         ['Stars', 'stargazers_count'],
         ['Forks', 'forks'],
-        ['Open Issues', 'open_issues_count'],
-        ['Size', 'size'],
-        ['Last Push', 'pushed_at'],
+        //['Open Issues', 'open_issues_count'],
+        //['Size', 'size'],
+        ['Last Update', 'pushed_at'],
     ];
 
     // Sort by stars:
@@ -118,18 +145,27 @@ function initDT() {
     table.searchBuilder.container().prependTo(table.table().container());
 }
 
-function fetchFromApi(url, property) {
-    return fetch(url)
+function api_fetch(url) {
+    return fetch(url, {
+        headers: request_headers,
+    });
+}
+
+function fetchAndShow(repo) {
+    repo = repo.replace('https://github.com/', '');
+    repo = repo.replace('http://github.com/', '');
+    repo = repo.replace(/\.git$/, '');
+    var default_branch;
+
+    var page_size = 50;
+
+    api_fetch(`https://api.github.com/repos/${repo}`)
         .then((response) => {
             if (!response.ok) throw Error(response.statusText);
             return response.json();
         })
         .then((data) => {
-            if (property === undefined) {
-                return data;
-            } else {
-                return data[property];
-            }
+            default_branch = data['default_branch'];
         })
         .catch((error) => {
             const msg =
@@ -139,24 +175,25 @@ function fetchFromApi(url, property) {
             showMsg(`${msg}. Additional info in console`, 'danger');
             console.error(error);
         });
-}
 
-function fetchAndShow(repo) {
-    repo = repo.replace('https://github.com/', '');
-    repo = repo.replace('http://github.com/', '');
-    repo = repo.replace(/\.git$/, '');
-
-    // fetch default branch
-    let default_branch = fetchFromApi(
-        `https://api.github.com/repos/${repo}`,
-        'default_branch'
-    );
-
-    // fetch forks
-    let data = fetchFromApi(
-        `https://api.github.com/repos/${repo}/forks?sort=stargazers&direction=desc&per_page=100`
-    );
-    updateDT(data, default_branch);
+    api_fetch(
+        `https://api.github.com/repos/${repo}/forks?sort=stargazers&per_page=${page_size}&direction=desc`
+    )
+        .then((response) => {
+            if (!response.ok) throw Error(response.statusText);
+            return response.json();
+        })
+        .then((data) => {
+            updateDT(data, repo, default_branch);
+        })
+        .catch((error) => {
+            const msg =
+                error.toString().indexOf('Forbidden') >= 0
+                    ? 'Error: API Rate Limit Exceeded'
+                    : error;
+            showMsg(`${msg}. Additional info in console`, 'danger');
+            console.error(error);
+        });
 }
 
 function showMsg(msg, type) {
